@@ -1,0 +1,6 @@
+date,fold,best_dice,best_epoch,train_loss_final,duration,gpu_count,batch_size,num_workers,lr,epochs,img_size,model_name,optimizer,scheduler,loss
+2026-02-03 11:43:15,0,0.9152,28,0.0375,0:27:45,8,8,4,0.0001,50,1024,ST-SAM (Sam2-Hiera-L + StripAdapter),AdamW,None,Dice + BCE
+2026-02-03 13:10:35,2,0.8834,48,0.0364,0:27:34,8,8,4,0.0001,50,1024,ST-SAM (Sam2-Hiera-L + StripAdapter),AdamW,None,Dice + BCE
+2026-02-03 13:40:18,3,0.9029,49,0.0370,0:26:45,8,8,4,0.0001,50,1024,ST-SAM (Sam2-Hiera-L + StripAdapter),AdamW,None,Dice + BCE
+2026-02-03 14:11:26,4,0.9083,37,0.0367,0:27:27,8,8,4,0.0001,50,1024,ST-SAM (Sam2-Hiera-L + StripAdapter),AdamW,None,Dice + BCE
+2026-02-04 07:04:32,1,0.9258,30,0.0396,0:27:15,8,8,4,0.0001,50,1024,ST-SAM (Sam2-Hiera-L + StripAdapter),AdamW,None,Dice + BCE
