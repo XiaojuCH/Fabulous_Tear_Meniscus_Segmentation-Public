@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from monai.networks.nets import UNet, SwinUNETR
 from monai.metrics import compute_dice, compute_hausdorff_distance
-
+from monai.networks.nets import UNet, SwinUNETR, AttentionUnet, SegResNet
 from dataset import TearDataset
 
 # ================= 配置 =================
@@ -47,11 +47,26 @@ def get_model(name):
         )
     elif name == "swinunet":
         return SwinUNETR(
-            img_size=(IMG_SIZE, IMG_SIZE),
+            # img_size=(IMG_SIZE, IMG_SIZE),
             in_channels=3,
             out_channels=1,
             feature_size=24, # 缩小一点以防爆显存，或者设为 48
-            spatial_dims=2
+            spatial_dims=2,
+            use_v2=True,       # 建议开启 SwinV2，更稳
+            window_size=8      # 🔥【关键修复】改成 8 完美适配 1024 分辨率
+        )
+    # === 新增模型 1: Attention U-Net ===
+    elif name == "attentionunet":
+        return AttentionUnet(
+            spatial_dims=2, in_channels=3, out_channels=1,
+            channels=(32, 64, 128, 256, 512),
+            strides=(2, 2, 2, 2),
+        )
+    # === 新增模型 2: SegResNet (NVIDIA强力模型) ===
+    elif name == "segresnet":
+        return SegResNet(
+            spatial_dims=2, in_channels=3, out_channels=1,
+            init_filters=32, blocks_down=[1, 2, 2, 4], blocks_up=[1, 1, 1]
         )
     else:
         raise ValueError(f"Unknown model: {name}")
@@ -160,7 +175,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fold", type=int, required=True)
-    parser.add_argument("--model", type=str, required=True, choices=["unet", "swinunet"])
+    parser.add_argument("--model", type=str, required=True, choices=["unet", "swinunet","attentionunet", "segresnet"])
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4) # CNN/Swin 通常用 3e-4 或 1e-3
     parser.add_argument("--epochs", type=int, default=50)

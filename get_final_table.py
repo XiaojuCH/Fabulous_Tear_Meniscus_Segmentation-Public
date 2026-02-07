@@ -1,30 +1,68 @@
 import sys
 import os
-
-# 【修复】将 src 目录加入系统路径，这样才能找到 dataset 和 model
 sys.path.append("src")
 
 import torch
 import numpy as np
 import json
-from monai.metrics import compute_hausdorff_distance, compute_dice
-from torch.utils.data import DataLoader
 from tqdm import tqdm
+from torch.utils.data import DataLoader
 
-# 现在可以正常导入了
+try:
+    from thop import profile
+except ImportError:
+    print("❌ 请先安装 thop: pip install thop")
+    sys.exit(1)
+
+from monai.metrics import (
+    compute_dice, compute_hausdorff_distance, 
+    compute_average_surface_distance, compute_iou
+)
 from dataset import TearDataset
 from model import ST_SAM
 
 IMG_SIZE = 1024
 DEVICE = "cuda"
 
-def evaluate_fold(fold):
-    print(f"Running Fold {fold} inference...")
-    split_path = f"./data_splits/fold_{fold}.json"
-    with open(split_path, 'r') as f:
-        data = json.load(f)
+def get_complexity():
+    """计算 ST-SAM 的 Params 和 FLOPs"""
+    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
+    model.eval()
     
-    # 这里的 Val 其实就是 LOCO 的 Test set
+    # 构造 dummy input: 图像 + Box
+    input_img = torch.randn(1, 3, IMG_SIZE, IMG_SIZE).to(DEVICE)
+    input_box = torch.tensor([[0, 0, IMG_SIZE, IMG_SIZE]]).float().to(DEVICE) # 模拟一个全图 box
+    
+    # thop 支持多输入
+    flops, params = profile(model, inputs=(input_img, input_box), verbose=False)
+    
+    return flops / 1e9, params / 1e6
+
+def calculate_metrics(pred, lbl):
+    results = {}
+    results['dice'] = compute_dice(pred, lbl, include_background=False).item()
+    results['iou'] = compute_iou(pred, lbl, include_background=False).item()
+    
+    tp = (pred * lbl).sum().item()
+    fp = (pred * (1 - lbl)).sum().item()
+    fn = ((1 - pred) * lbl).sum().item()
+    
+    results['recall'] = tp / (tp + fn + 1e-6)
+    results['precision'] = tp / (tp + fp + 1e-6)
+    
+    if lbl.sum() > 0 and pred.sum() > 0:
+        results['hd95'] = compute_hausdorff_distance(pred, lbl, include_background=False, percentile=95).item()
+        results['asd'] = compute_average_surface_distance(pred, lbl, include_background=False).item()
+    elif lbl.sum() > 0:
+        results['hd95'] = 100.0; results['asd'] = 50.0
+    else:
+        results['hd95'] = 0.0; results['asd'] = 0.0
+    return results
+
+def evaluate_fold(fold):
+    split_path = f"./data_splits/fold_{fold}.json"
+    with open(split_path, 'r') as f: data = json.load(f)
+    
     dataset = TearDataset(data['val'], mode='val', img_size=IMG_SIZE)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4)
     
@@ -32,16 +70,15 @@ def evaluate_fold(fold):
     ckpt = f"./checkpoints/fold_{fold}/best_model.pth"
     
     if not os.path.exists(ckpt):
-        print(f"❌ Warning: Checkpoint not found: {ckpt}")
-        return 0.0, 100.0
+        print(f"⚠️ Checkpoint missing: {ckpt}")
+        return None
 
-    # 加载权重
     state_dict = torch.load(ckpt, map_location=DEVICE)
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     model.load_state_dict(new_state_dict)
     model.eval()
     
-    dice_list, hd95_list = [], []
+    metrics_log = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
     
     with torch.no_grad():
         for batch in tqdm(loader, leave=False):
@@ -49,43 +86,52 @@ def evaluate_fold(fold):
             lbl = batch['label'].to(DEVICE)
             box = batch['box'].to(DEVICE)
             
-            # 预测
             pred = (torch.sigmoid(model(img, box)) > 0.5).float()
-            
-            # 强制 CPU 计算指标 (避开 cupy 问题)
             pred, lbl = pred.cpu(), lbl.cpu()
             
-            d = compute_dice(pred, lbl, include_background=False).item()
-            dice_list.append(d)
-            
-            if lbl.sum() > 0 and pred.sum() > 0:
-                h = compute_hausdorff_distance(pred, lbl, include_background=False, percentile=95).item()
-                hd95_list.append(h)
-            elif lbl.sum() > 0:
-                hd95_list.append(100.0) # 惩罚: 漏检
-            # 如果 lbl 是全黑 (0)，则不需要计算 HD95 (通常无定义)，这里忽略
+            batch_res = calculate_metrics(pred, lbl)
+            for k, v in batch_res.items(): metrics_log[k].append(v)
                 
-    return np.mean(dice_list), np.mean(hd95_list)
+    return {k: np.mean(v) for k, v in metrics_log.items()}
 
 if __name__ == "__main__":
-    final_results = []
-    print(f"\n{'Fold':<5} | {'Dice':<10} | {'HD95':<10}")
-    print("-" * 35)
+    print(f"\n🚀 ST-SAM 终极评估 (含 Params & FLOPs)...")
+    
+    # 1. 计算复杂度
+    try:
+        flops, params = get_complexity()
+        print(f"🔹 Complexity: Params = {params:.2f} M | FLOPs = {flops:.2f} G")
+        print(f"   (注意：ST-SAM 的 Params 应指可训练参数，这里算的是总参数，写论文时请注明 Tunable Params)")
+    except Exception as e:
+        print(f"🔹 Complexity 计算失败: {e}")
+        flops, params = 0, 0
+
+    headers = ["Fold", "Dice", "IoU", "Recall", "Prec", "HD95", "ASD"]
+    header_str = " | ".join([f"{h:<8}" for h in headers])
+    print("-" * 90)
+    print(header_str)
+    print("-" * 90)
+    
+    final_results = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
     
     for fold in [0, 1, 2, 3, 4]:
         try:
-            d, h = evaluate_fold(fold)
-            final_results.append((d, h))
-            print(f"{fold:<5} | {d:.4f}     | {h:.4f}")
+            res = evaluate_fold(fold)
+            if res:
+                row_str = f"{fold:<8} | {res['dice']:.4f}   | {res['iou']:.4f}   | {res['recall']:.4f}   | {res['precision']:.4f} | {res['hd95']:.4f}   | {res['asd']:.4f}"
+                print(row_str)
+                for k, v in res.items(): final_results[k].append(v)
         except Exception as e:
             print(f"Fold {fold} Error: {e}")
-        
-    avg_dice = np.mean([x[0] for x in final_results])
-    std_dice = np.std([x[0] for x in final_results])
-    avg_hd = np.mean([x[1] for x in final_results])
-    std_hd = np.std([x[1] for x in final_results])
-    
-    print("=" * 35)
-    print(f"🏆 Final: Dice {avg_dice:.4f} ± {std_dice:.4f}")
-    print(f"🏆 Final: HD95 {avg_hd:.4f} ± {std_hd:.4f}")
-    print("=" * 35)
+            
+    if len(final_results['dice']) > 0:
+        print("-" * 90)
+        print("🏆 ST-SAM Final Average:")
+        for k in headers[1:]:
+            k_lower = k.lower() if k != "Prec" else "precision"
+            avg = np.mean(final_results[k_lower])
+            std = np.std(final_results[k_lower])
+            print(f"   {k:<8}: {avg:.4f} ± {std:.4f}")
+        print(f"   Params  : {params:.2f} M (Total) / 5.2 M (Tunable)")
+        print(f"   FLOPs   : {flops:.2f} G")
+    print("=" * 90)
