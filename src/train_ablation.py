@@ -1,9 +1,9 @@
 import os
 import argparse
 import json
-import time  # <---【新增】用于计时
-import datetime # <---【新增】用于记录日期
-import csv   # <---【新增】用于写表格
+import time
+import datetime
+import csv
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,25 +15,24 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 import warnings
-# 过滤掉关于 Grad strides 的特定警告
 warnings.filterwarnings("ignore", message="Grad strides do not match bucket view strides")
 
 from dataset import TearDataset
-from model import ST_SAM
+# 【修改 1】导入消融实验专用的 Baseline 模型
+# 请确保你的 model.py 里已经加了我刚才给你的 Baseline_SAM2 类
+from model import Baseline_SAM2 
 
 # ==============================================================================
 # 配置区域 (Global Config)
 # ==============================================================================
-# 建议把配置写成字典，方便保存
 CONFIG = {
     "batch_size": 8,
     "num_workers": 4,
-    "lr": 1e-4,
-    "epochs": 50,
+    "lr": 1e-4,          # 保持和 ST-SAM 一致，确保公平
+    "epochs": 50,        # 保持和 ST-SAM 一致
     "img_size": 1024,
-    "model_name": "ST-SAM (Sam2-Hiera-L + NewStripDetailAdapter)",
+    "model_name": "Baseline SAM 2 (Ablation - No Adapter)", # 【修改 2】名称
     "optimizer": "AdamW",
-    "scheduler": "None", # 如果加了 scheduler 这里也要记
     "loss": "Dice + BCE",
     "gpu_count": 8
 }
@@ -44,11 +43,8 @@ def setup_ddp():
         rank = int(os.environ["RANK"])
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
-        
-        # 加强版检测：防止 ordinal 越界
         num_gpus = torch.cuda.device_count()
         actual_gpu = local_rank % num_gpus 
-        
         torch.cuda.set_device(actual_gpu)
         return rank, actual_gpu, world_size
     else:
@@ -71,15 +67,12 @@ class DiceBCELoss(nn.Module):
         dice_loss = 1 - (2.*intersection + smooth)/(inputs_flat.sum() + targets_flat.sum() + smooth)
         return 0.5 * bce_loss + 0.5 * dice_loss
 
-# ==============================================================================
-# 辅助函数：记录实验数据到 CSV
-# ==============================================================================
 def log_to_csv(stats, filename="experiment_summary.csv"):
     file_exists = os.path.isfile(filename)
     with open(filename, mode='a', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=stats.keys())
         if not file_exists:
-            writer.writeheader() # 如果文件不存在，先写表头
+            writer.writeheader()
         writer.writerow(stats)
 
 # ==============================================================================
@@ -89,18 +82,16 @@ def main(fold):
     rank, local_rank, world_size = setup_ddp()
     is_master = (rank == 0)
 
-    # 【新增】开始计时
     start_timestamp = time.time()
     start_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if is_master:
-        print(f"\n🚀 启动训练: Fold {fold} | GPUs: {world_size} | Model: {CONFIG['model_name']}")
+        print(f"\n🚀 启动消融实验: Fold {fold} | GPUs: {world_size} | Model: {CONFIG['model_name']}")
 
     split_path = f"./data_splits/fold_{fold}.json"
     with open(split_path, 'r') as f:
         split_data = json.load(f)
     
-    # 使用 CONFIG 里的参数
     train_dataset = TearDataset(split_data['train'], mode='train', img_size=CONFIG['img_size'])
     val_dataset = TearDataset(split_data['val'], mode='val', img_size=CONFIG['img_size'])
 
@@ -110,7 +101,9 @@ def main(fold):
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], sampler=train_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], sampler=val_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
 
-    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    # 【修改 3】实例化 Baseline 模型
+    model = Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
@@ -120,9 +113,12 @@ def main(fold):
 
     best_dice = 0.0
     best_epoch = 0
-    save_dir = f"./checkpoints/fold_{fold}"
+    
+    # 【修改 4】保存路径改为 checkpoints_ablation，防止覆盖 ST-SAM
+    save_dir = f"./checkpoints_ablation/fold_{fold}"
     if is_master:
         os.makedirs(save_dir, exist_ok=True)
+        print(f"📂 权重保存路径: {save_dir}")
 
     for epoch in range(CONFIG['epochs']):
         model.train()
@@ -184,22 +180,19 @@ def main(fold):
                 torch.save(model.module.state_dict(), f"{save_dir}/best_model.pth")
                 print(f"🔥 New Best Dice: {best_dice:.4f} (Epoch {best_epoch}) -> Saved!")
             
+            # 可选：不保存 last_model 以节省空间，或者保留也行
             torch.save(model.module.state_dict(), f"{save_dir}/last_model.pth")
 
-    # ==============================================================================
-    # 【新增】训练结束：记录统计信息
-    # ==============================================================================
     if is_master:
         total_time = time.time() - start_timestamp
         time_str = str(datetime.timedelta(seconds=int(total_time)))
         
         print("\n" + "="*40)
-        print(f"🏁 Fold {fold} 训练完成！")
+        print(f"🏁 Ablation Fold {fold} 训练完成！")
         print(f"⏱️ 总耗时: {time_str}")
-        print(f"🏆 最佳 Dice: {best_dice:.4f} (Epoch {best_epoch})")
+        print(f"🏆 最佳 Dice: {best_dice:.4f}")
         print("="*40)
 
-        # 1. 准备统计字典
         stats = {
             "date": start_date,
             "fold": fold,
@@ -208,24 +201,18 @@ def main(fold):
             "train_loss_final": f"{avg_train_loss:.4f}",
             "duration": time_str,
             "gpu_count": world_size,
-            **CONFIG # 把所有超参数解包进去
+            **CONFIG
         }
 
-        # 2. 保存详细 JSON 到 checkpoint 目录
-        json_path = os.path.join(save_dir, "train_config_result.json")
-        with open(json_path, "w") as f:
-            json.dump(stats, f, indent=4)
-        print(f"📄 详细配置已保存: {json_path}")
-
-        # 3. 追加汇总 CSV 到根目录 (方便 Excel 打开)
-        log_to_csv(stats, filename="experiment_summary.csv")
-        print(f"📊 汇总记录已追加: experiment_summary.csv")
-
+        # 保存消融实验记录到 summary_ablation.csv
+        log_to_csv(stats, filename="experiment_summary_ablation.csv")
+        
     cleanup()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fold", type=int, default=0, help="LOCO fold index (0-4)")
+    # 默认只跑 Fold 0 就够了，如果想跑完就把 range 改一下
+    parser.add_argument("--fold", type=int, default=0, help="LOCO fold index")
     args = parser.parse_args()
     
     main(fold=args.fold)
