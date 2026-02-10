@@ -5,7 +5,9 @@ from sam2.build_sam import build_sam2
 import os
 
 # 引入你刚才写好的新注意力模块
-from New_att import StripDetailAdapter 
+# from New_att import StripDetailAdapter # 旧版
+# from New_att_v2 import GatedStripAdapter
+from New_att_v2 import GatedDilatedStripAdapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
@@ -43,10 +45,18 @@ class ST_SAM(nn.Module):
         
         # 【核心改进】在高分辨率层插入 Strip Adapter
         # s0 (Stride 4): 最精细的特征，通道数 32
-        self.adapter_s0 = StripDetailAdapter(in_channels=32, kernel_size=7)
+        self.adapter_s0 = GatedDilatedStripAdapter(
+            in_channels=32, 
+            kernel_size=15, 
+            dilation=1  # 保持精细度
+        )
         
         # s1 (Stride 8): 次精细特征，通道数 64
-        self.adapter_s1 = StripDetailAdapter(in_channels=64, kernel_size=7)
+        self.adapter_s1 = GatedDilatedStripAdapter(
+            in_channels=32, 
+            kernel_size=15, 
+            dilation=1  # 保持精细度
+        )
 
         # ---------------------------------------------------------
         # 4. 开启需要训练部分的梯度

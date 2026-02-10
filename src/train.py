@@ -31,7 +31,7 @@ CONFIG = {
     "lr": 1e-4,
     "epochs": 50,
     "img_size": 1024,
-    "model_name": "ST-SAM (Sam2-Hiera-L + NewStripDetailAdapter)",
+    "model_name": "ST-SAM (Sam2-Hiera-L + GatedDilatedStripAdapter)",
     "optimizer": "AdamW",
     "scheduler": "None", # 如果加了 scheduler 这里也要记
     "loss": "Dice + BCE",
