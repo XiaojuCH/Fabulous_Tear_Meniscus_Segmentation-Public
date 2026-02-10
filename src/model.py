@@ -7,7 +7,8 @@ import os
 # 引入你刚才写好的新注意力模块
 # from New_att import StripDetailAdapter # 旧版
 # from New_att_v2 import GatedStripAdapter
-from New_att_v2 import GatedDilatedStripAdapter
+# from New_att_v3 import GatedDilatedStripAdapter
+from NNew_att_v2_plus import GatedMultiScaleStripAdapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
@@ -43,19 +44,22 @@ class ST_SAM(nn.Module):
         self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
         self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
         
-        # 【核心改进】在高分辨率层插入 Strip Adapter
-        # s0 (Stride 4): 最精细的特征，通道数 32
-        self.adapter_s0 = GatedDilatedStripAdapter(
+#       【s0 层 (Stride 4)】: 最精细层
+        # 策略：Large=15 (看局部长条), Small=5 (看像素细节)
+        # s0 分辨率很高(256x256)，核不用太大，重点是修补边缘
+        self.adapter_s0 = GatedMultiScaleStripAdapter(
             in_channels=32, 
-            kernel_size=15, 
-            dilation=1  # 保持精细度
+            kernel_size_large=15, 
+            kernel_size_small=5 
         )
         
-        # s1 (Stride 8): 次精细特征，通道数 64
-        self.adapter_s1 = GatedDilatedStripAdapter(
-            in_channels=32, 
-            kernel_size=15, 
-            dilation=1  # 保持精细度
+        # 【s1 层 (Stride 8)】: 抗干扰层
+        # 策略：Large=23 (看整体轮廓，抗圆环干扰), Small=7 (防断裂)
+        # s1 负责在 128x128 尺度上把泪河“连起来”
+        self.adapter_s1 = GatedMultiScaleStripAdapter(
+            in_channels=64, 
+            kernel_size_large=23, 
+            kernel_size_small=7
         )
 
         # ---------------------------------------------------------
