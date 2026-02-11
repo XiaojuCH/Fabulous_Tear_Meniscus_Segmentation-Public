@@ -8,7 +8,9 @@ import os
 # from New_att import StripDetailAdapter # 旧版
 # from New_att_v2 import GatedStripAdapter
 # from New_att_v3 import GatedDilatedStripAdapter
-from NNew_att_v2_plus import GatedMultiScaleStripAdapter
+# from NNew_att_v2_plus import GatedMultiScaleStripAdapter
+from NNew_att_v2_plus_plus import GatedMultiScaleStripAdapter
+
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
