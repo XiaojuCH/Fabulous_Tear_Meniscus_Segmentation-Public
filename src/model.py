@@ -9,7 +9,8 @@ import os
 # from New_att_v2 import GatedStripAdapter
 # from New_att_v3 import GatedDilatedStripAdapter
 # from NNew_att_v2_plus import GatedMultiScaleStripAdapter
-from NNew_att_v2_plus_plus import GatedMultiScaleStripAdapter
+# from NNew_att_v2_plus_plus import GatedMultiScaleStripAdapter
+from NNew_att_v2_PPP import GatedMultiScaleStripAdapter
 
 
 # ==============================================================================
