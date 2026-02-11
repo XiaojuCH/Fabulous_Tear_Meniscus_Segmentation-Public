@@ -11,7 +11,9 @@ import os
 # from NNew_att_v2_plus import GatedMultiScaleStripAdapter
 # from NNew_att_v2_plus_plus import GatedMultiScaleStripAdapter
 # from NNew_att_v2_PPP import GatedMultiScaleStripAdapter
-from NNew_att_v2_4P import GatedMultiScaleStripAdapter
+# from NNew_att_v2_4P import GatedMultiScaleStripAdapter
+from NNNew_att_v2_V4 import GatedMultiScaleStripAdapterV4
+
 
 
 # ==============================================================================
@@ -51,7 +53,7 @@ class ST_SAM(nn.Module):
 #       【s0 层 (Stride 4)】: 最精细层
         # 策略：Large=15 (看局部长条), Small=5 (看像素细节)
         # s0 分辨率很高(256x256)，核不用太大，重点是修补边缘
-        self.adapter_s0 = GatedMultiScaleStripAdapter(
+        self.adapter_s0 = GatedMultiScaleStripAdapterV4(
             in_channels=32, 
             kernel_size_large=15, 
             kernel_size_small=5 
@@ -60,7 +62,7 @@ class ST_SAM(nn.Module):
         # 【s1 层 (Stride 8)】: 抗干扰层
         # 策略：Large=23 (看整体轮廓，抗圆环干扰), Small=7 (防断裂)
         # s1 负责在 128x128 尺度上把泪河“连起来”
-        self.adapter_s1 = GatedMultiScaleStripAdapter(
+        self.adapter_s1 = GatedMultiScaleStripAdapterV4(
             in_channels=64, 
             kernel_size_large=23, 
             kernel_size_small=7
@@ -79,7 +81,8 @@ class ST_SAM(nn.Module):
             for param in layer.parameters():
                 param.requires_grad = True
 
-    def forward(self, images, box_prompts):
+    # def forward(self, images, box_prompts):
+    def forward(self, images, box_prompts, pupil_heatmap=None):
         """
         images: [B, 3, 1024, 1024]
         box_prompts: [B, 4]
@@ -102,8 +105,12 @@ class ST_SAM(nn.Module):
         
         # Step B: 注入条状注意力 (Strip Attention Injection)
         # 这里是关键！在送入 Decoder 之前，先增强边界特征
-        refined_s0 = self.adapter_s0(feat_s0) 
-        refined_s1 = self.adapter_s1(feat_s1)
+        
+        # refined_s0 = self.adapter_s0(feat_s0) 
+        # refined_s1 = self.adapter_s1(feat_s1)
+
+        refined_s0 = self.adapter_s0(feat_s0, pupil_heatmap=pupil_heatmap)  # 传递参数
+        refined_s1 = self.adapter_s1(feat_s1, pupil_heatmap=pupil_heatmap)  # 传递参数
         
         high_res_features = [refined_s0, refined_s1]
         # -------------------------------------------------------
