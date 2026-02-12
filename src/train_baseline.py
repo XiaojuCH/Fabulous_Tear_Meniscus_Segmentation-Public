@@ -18,6 +18,22 @@ from monai.metrics import compute_dice, compute_hausdorff_distance
 from monai.networks.nets import UNet, SwinUNETR, AttentionUnet, SegResNet
 from dataset import TearDataset
 
+class DiceBCELoss(nn.Module):
+    def __init__(self):
+        super(DiceBCELoss, self).__init__()
+
+    def forward(self, inputs, targets, smooth=1):
+        bce = F.binary_cross_entropy_with_logits(inputs, targets)
+        inputs = torch.sigmoid(inputs)
+        inputs = inputs.view(-1)
+        targets = targets.view(-1)
+        intersection = (inputs * targets).sum()
+        dice = 1 - (2. * intersection + smooth) / (
+            inputs.sum() + targets.sum() + smooth
+        )
+        return 0.5 * bce + 0.5 * dice
+
+
 # ================= 配置 =================
 IMG_SIZE = 1024  # 保持和 ST-SAM 一致，公平对比
 
@@ -50,7 +66,7 @@ def get_model(name):
             # img_size=(IMG_SIZE, IMG_SIZE),
             in_channels=3,
             out_channels=1,
-            feature_size=24, # 缩小一点以防爆显存，或者设为 48
+            feature_size=48, # 缩小一点以防爆显存，或者设为 48
             spatial_dims=2,
             use_v2=True,       # 建议开启 SwinV2，更稳
             window_size=8      # 🔥【关键修复】改成 8 完美适配 1024 分辨率
@@ -102,11 +118,11 @@ def main(args):
 
     # 3. 优化器 (Baseline 通常需要全量微调，LR 要大一点)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
-    loss_fn = torch.nn.BCEWithLogitsLoss() # 简单起见，或者复用 DiceCELoss
+    loss_fn = DiceBCELoss().to(local_rank)
     scaler = GradScaler('cuda')
 
     best_dice = 0.0
-    save_dir = f"./checkpoints_baseline/{args.model}/fold_{args.fold}"
+    save_dir = f"./checkpoints_New_baseline/{args.model}/fold_{args.fold}"
     if is_master: os.makedirs(save_dir, exist_ok=True)
     
     start_time = time.time()
@@ -177,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--fold", type=int, required=True)
     parser.add_argument("--model", type=str, required=True, choices=["unet", "swinunet","attentionunet", "segresnet"])
     parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=3e-4) # CNN/Swin 通常用 3e-4 或 1e-3
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=1e-4) # CNN/Swin 通常用 3e-4 或 1e-3
+    parser.add_argument("--epochs", type=int, default=100)
     args = parser.parse_args()
     main(args)
