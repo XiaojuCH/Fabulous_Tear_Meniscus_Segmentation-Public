@@ -44,7 +44,7 @@ def get_model(name):
     elif name == "swinunet":
         return SwinUNETR(
             in_channels=3, out_channels=1,
-            feature_size=24, spatial_dims=2,
+            feature_size=48, spatial_dims=2,
             use_v2=True,      
             window_size=8      # 适配 1024 (1024/32=32, 32%8=0)
         )
@@ -134,7 +134,7 @@ def evaluate_fold(model_name, fold):
     model = get_model(model_name).to(DEVICE)
     
     # 路径检查
-    ckpt_path = f"./checkpoints_baseline/{model_name}/fold_{fold}/best_model.pth"
+    ckpt_path = f"./checkpoints_New_baseline/{model_name}/fold_{fold}/best_model.pth"
     if not os.path.exists(ckpt_path):
         # 尝试另一种常见命名格式 (防止文件夹命名不一致)
         ckpt_path = f"./checkpoints/{model_name}/fold_{fold}/best_model.pth"
@@ -177,7 +177,11 @@ if __name__ == "__main__":
     print(f"📌 Device: {DEVICE} | HD95 Penalty: {MAX_HD95:.2f}")
     
     # 这里列出你想跑的所有 Baseline
-    models_to_run = ["unet", "attentionunet", "swinunet", "segresnet"]
+    # models_to_run = ["unet"]
+    # models_to_run = ["attentionunet"]
+    # models_to_run = ["swinunet"]
+    models_to_run = ["segresnet"]
+    #models_to_run = ["unet", "attentionunet", "swinunet", "segresnet"]
     # 如果只想跑某一个，可以注释掉其他的，比如:
     # models_to_run = ["attentionunet"]
 

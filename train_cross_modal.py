@@ -15,26 +15,25 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 import warnings
-warnings.filterwarnings("ignore", message="Grad strides do not match bucket view strides")
+warnings.filterwarnings("ignore")
 
 from dataset import TearDataset
-# 【修改 1】导入消融实验专用的 Baseline 模型
-# 请确保你的 model.py 里已经加了我刚才给你的 Baseline_SAM2 类
-from model import Baseline_SAM2 
+# 引用你的最终版模型
+from model import ST_SAM 
 
 # ==============================================================================
-# 配置区域 (Global Config)
+# 配置区域
 # ==============================================================================
 CONFIG = {
     "batch_size": 8,
     "num_workers": 4,
-    "lr": 1e-4,          # 保持和 ST-SAM 一致，确保公平
-    "epochs": 100,        # 保持和 ST-SAM 一致
+    "lr": 1e-4,
+    "epochs": 50, # 跨模态通常收敛快，50够了，想跑满100也行
     "img_size": 1024,
-    "model_name": "Baseline SAM 2 (Ablation - No Adapter)", # 【修改 2】名称
+    "model_name": "ST-SAM (Cross-Modality Test)",
     "optimizer": "AdamW",
     "loss": "Dice + BCE",
-    "gpu_count": 8
+    "gpu_count": 8 # 根据你实际情况调整
 }
 
 def setup_ddp():
@@ -44,9 +43,8 @@ def setup_ddp():
         local_rank = int(os.environ["LOCAL_RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         num_gpus = torch.cuda.device_count()
-        actual_gpu = local_rank % num_gpus 
-        torch.cuda.set_device(actual_gpu)
-        return rank, actual_gpu, world_size
+        torch.cuda.set_device(local_rank % num_gpus)
+        return rank, local_rank % num_gpus, world_size
     else:
         return 0, 0, 1
 
@@ -67,33 +65,67 @@ class DiceBCELoss(nn.Module):
         dice_loss = 1 - (2.*intersection + smooth)/(inputs_flat.sum() + targets_flat.sum() + smooth)
         return 0.5 * bce_loss + 0.5 * dice_loss
 
-def log_to_csv(stats, filename="experiment_summary.csv"):
-    file_exists = os.path.isfile(filename)
-    with open(filename, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=stats.keys())
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(stats)
+# ==============================================================================
+# 核心：自动构建跨模态数据集
+# ==============================================================================
+def get_cross_modal_data(mode="train_color_test_ir"):
+    """
+    遍历所有 fold 的 json，合并后根据文件名里的关键字强行拆分。
+    """
+    all_data = []
+    # 1. 把所有数据收集起来 (利用 fold_0 到 fold_4 的 val 集互斥且互补的特性)
+    for i in range(5):
+        json_path = f"./data_splits/fold_{i}.json"
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                split = json.load(f)
+                # LOCO 协议中，验证集是不重复的，把所有 fold 的 val 加起来就是全集
+                all_data.extend(split['val'])
+        else:
+            print(f"⚠️ Warning: {json_path} not found.")
+
+    print(f"📦 Total images found: {len(all_data)}")
+    
+    # 2. 根据文件名过滤
+    # 假设文件名类似: "Color1_xxx.jpg" 或 "Infrared1_xxx.jpg"
+    color_data = []
+    ir_data = []
+    
+    for item in all_data:
+        # 检查 image 路径字符串
+        img_path = item['image'] if isinstance(item, dict) else item
+        
+        # 你的文件名特征：Color vs Infrared
+        if "Color" in img_path:
+            color_data.append(item)
+        elif "Infrared" in img_path:
+            ir_data.append(item)
+            
+    print(f"🎨 Color Images: {len(color_data)}")
+    print(f"🌑 Infrared Images: {len(ir_data)}")
+    
+    # 3. 根据模式返回
+    if mode == "train_color_test_ir":
+        print("👉 Setting: Train on [Color] -> Test on [Infrared]")
+        return color_data, ir_data
+    elif mode == "train_ir_test_color":
+        print("👉 Setting: Train on [Infrared] -> Test on [Color]")
+        return ir_data, color_data
+    else:
+        raise ValueError("Unknown mode")
 
 # ==============================================================================
 # 训练主循环
 # ==============================================================================
-def main(fold):
+def main(mode):
     rank, local_rank, world_size = setup_ddp()
     is_master = (rank == 0)
 
-    start_timestamp = time.time()
-    start_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if is_master:
-        print(f"\n🚀 启动消融实验: Fold {fold} | GPUs: {world_size} | Model: {CONFIG['model_name']}")
-
-    split_path = f"./data_splits/fold_{fold}.json"
-    with open(split_path, 'r') as f:
-        split_data = json.load(f)
+    # 获取跨模态数据
+    train_list, val_list = get_cross_modal_data(mode)
     
-    train_dataset = TearDataset(split_data['train'], mode='train', img_size=CONFIG['img_size'])
-    val_dataset = TearDataset(split_data['val'], mode='val', img_size=CONFIG['img_size'])
+    train_dataset = TearDataset(train_list, mode='train', img_size=CONFIG['img_size'])
+    val_dataset = TearDataset(val_list, mode='val', img_size=CONFIG['img_size'])
 
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
@@ -101,9 +133,7 @@ def main(fold):
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], sampler=train_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], sampler=val_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
 
-    # 【修改 3】实例化 Baseline 模型
-    model = Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
-    
+    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
@@ -112,13 +142,12 @@ def main(fold):
     scaler = GradScaler('cuda') 
 
     best_dice = 0.0
-    best_epoch = 0
     
-    # 【修改 4】保存路径改为 checkpoints_ablation，防止覆盖 ST-SAM
-    save_dir = f"./checkpoints_ablation/fold_{fold}"
+    # 保存目录区分模式
+    save_dir = f"./checkpoints_cross_modal/{mode}"
     if is_master:
         os.makedirs(save_dir, exist_ok=True)
-        print(f"📂 权重保存路径: {save_dir}")
+        print(f"🚀 Start Training: {mode}")
 
     for epoch in range(CONFIG['epochs']):
         model.train()
@@ -144,7 +173,7 @@ def main(fold):
             train_loss += loss.item()
             pbar.set_postfix(loss=loss.item())
 
-        # Validation
+        # Validation (Testing on the OTHER modality)
         model.eval()
         val_dice = 0.0
         with torch.no_grad():
@@ -162,57 +191,25 @@ def main(fold):
                 dice = (2. * intersection) / (preds_bin.sum() + labels.sum() + 1e-6)
                 val_dice += dice.item()
 
-        # Reduce
-        train_loss_tensor = torch.tensor(train_loss).to(local_rank)
-        all_reduce(train_loss_tensor, op=ReduceOp.SUM)
-        avg_train_loss = train_loss_tensor.item() / (len(train_loader) * world_size)
-
+        # Reduce metrics
         val_dice_tensor = torch.tensor(val_dice).to(local_rank)
         all_reduce(val_dice_tensor, op=ReduceOp.SUM)
         avg_val_dice = val_dice_tensor.item() / (len(val_loader) * world_size)
 
         if is_master:
-            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Dice: {avg_val_dice:.4f}")
+            print(f"Epoch {epoch+1} | Val Dice ({mode.split('_')[-1].upper()}): {avg_val_dice:.4f}")
             
             if avg_val_dice > best_dice:
                 best_dice = avg_val_dice
-                best_epoch = epoch + 1
                 torch.save(model.module.state_dict(), f"{save_dir}/best_model.pth")
-                print(f"🔥 New Best Dice: {best_dice:.4f} (Epoch {best_epoch}) -> Saved!")
-            
-            # 可选：不保存 last_model 以节省空间，或者保留也行
-            torch.save(model.module.state_dict(), f"{save_dir}/last_model.pth")
+                print(f"🔥 New Best Dice: {best_dice:.4f} -> Saved!")
 
-    if is_master:
-        total_time = time.time() - start_timestamp
-        time_str = str(datetime.timedelta(seconds=int(total_time)))
-        
-        print("\n" + "="*40)
-        print(f"🏁 Ablation Fold {fold} 训练完成！")
-        print(f"⏱️ 总耗时: {time_str}")
-        print(f"🏆 最佳 Dice: {best_dice:.4f}")
-        print("="*40)
-
-        stats = {
-            "date": start_date,
-            "fold": fold,
-            "best_dice": f"{best_dice:.4f}",
-            "best_epoch": best_epoch,
-            "train_loss_final": f"{avg_train_loss:.4f}",
-            "duration": time_str,
-            "gpu_count": world_size,
-            **CONFIG
-        }
-
-        # 保存消融实验记录到 summary_ablation.csv
-        log_to_csv(stats, filename="experiment_summary_ablation.csv")
-        
     cleanup()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # 默认只跑 Fold 0 就够了，如果想跑完就把 range 改一下
-    parser.add_argument("--fold", type=int, default=0, help="LOCO fold index")
+    # 模式选择：train_color_test_ir 或 train_ir_test_color
+    parser.add_argument("--mode", type=str, default="train_color_test_ir", help="Experiment mode")
     args = parser.parse_args()
     
-    main(fold=args.fold)
+    main(mode=args.mode)
