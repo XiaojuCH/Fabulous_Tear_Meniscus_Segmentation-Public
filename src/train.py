@@ -102,7 +102,14 @@ def main(fold):
     
     # 使用 CONFIG 里的参数
     train_dataset = TearDataset(split_data['train'], mode='train', img_size=CONFIG['img_size'])
-    val_dataset = TearDataset(split_data['val'], mode='val', img_size=CONFIG['img_size'])
+    # 【修复】动态获取当前 fold 的 YOLO 预测框文件，并传给验证集
+    yolo_json_path = f"./data_splits/yolo_boxes_fold{fold}.json"
+    val_dataset = TearDataset(
+        split_data['val'], 
+        mode='val', 
+        img_size=CONFIG['img_size'], 
+        yolo_pred_json=yolo_json_path  # <--- 就是漏了这极其关键的参数！
+    )
 
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)

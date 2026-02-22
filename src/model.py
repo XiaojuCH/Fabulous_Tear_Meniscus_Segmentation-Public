@@ -14,7 +14,8 @@ import os
 # from NNew_att_v2_4P import GatedMultiScaleStripAdapter
 # from NNNew_att_v2_PPPGPT import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
-from NNNew_att_v2_PPPGPT_final_bk import GSCSA
+# from NNNew_att_v2_PPPGPT_final_bk import GSCSA
+from NNNew_att_GAL import GAL_Adapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
@@ -53,7 +54,7 @@ class ST_SAM(nn.Module):
 #       【s0 层 (Stride 4)】: 最精细层
         # 策略：Large=15 (看局部长条), Small=5 (看像素细节)
         # s0 分辨率很高(256x256)，核不用太大，重点是修补边缘
-        self.adapter_s0 = GSCSA(
+        self.adapter_s0 = GAL_Adapter(
             in_channels=32, 
             kernel_size_large=15, 
             kernel_size_small=5 
@@ -62,7 +63,7 @@ class ST_SAM(nn.Module):
         # 【s1 层 (Stride 8)】: 抗干扰层
         # 策略：Large=23 (看整体轮廓，抗圆环干扰), Small=7 (防断裂)
         # s1 负责在 128x128 尺度上把泪河“连起来”
-        self.adapter_s1 = GSCSA(
+        self.adapter_s1 = GAL_Adapter(
             in_channels=64, 
             kernel_size_large=23, 
             kernel_size_small=7

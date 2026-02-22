@@ -92,8 +92,16 @@ def main(fold):
     with open(split_path, 'r') as f:
         split_data = json.load(f)
     
+    yolo_json_path = f"./data_splits/yolo_boxes_fold{fold}.json"
+    
     train_dataset = TearDataset(split_data['train'], mode='train', img_size=CONFIG['img_size'])
-    val_dataset = TearDataset(split_data['val'], mode='val', img_size=CONFIG['img_size'])
+    # 【修复】把 yolo_pred_json 传进去！
+    val_dataset = TearDataset(
+        split_data['val'], 
+        mode='val', 
+        img_size=CONFIG['img_size'], 
+        yolo_pred_json=yolo_json_path
+    )
 
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
