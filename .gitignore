@@ -1,2 +1,9 @@
 checkpoints/
+checkpoint*/
 *.pth
+logs/
+YOLO_Data/
+YOLO_Fold0/
+runs/
+*.pt
+__pycache__/
