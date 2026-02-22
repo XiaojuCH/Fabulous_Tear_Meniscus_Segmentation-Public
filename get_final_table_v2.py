@@ -193,8 +193,8 @@ if __name__ == "__main__":
     print(f"\n{' | '.join([f'{h:<8}' for h in headers])}")
     print("-" * 100)
     
-    # for fold in [0, 1, 2, 3, 4]:
-    for fold in [0]:
+    for fold in [0, 1, 2, 3, 4]:
+    # for fold in [0]:
         res = evaluate_fold(fold)
         if res:
             # 格式化打印单行

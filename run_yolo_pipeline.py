@@ -100,7 +100,7 @@ def run_fold(fold):
 
 if __name__ == '__main__':
     # 自动执行 Fold 1, 2, 3, 4 (因为 Fold 0 你已经跑过了)
-    for i in range(2, 5):
+    for i in range(4, 5):
         run_fold(i)
     
     print("\n🎉🎉🎉 恭喜！所有 5 个 Fold 的 YOLO 预测框全部生成完毕！")

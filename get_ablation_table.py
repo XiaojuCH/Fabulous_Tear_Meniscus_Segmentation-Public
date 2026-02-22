@@ -1,5 +1,6 @@
 import sys
 import os
+import math
 sys.path.append("src")
 
 import torch
@@ -19,22 +20,19 @@ from monai.metrics import (
     compute_average_surface_distance, compute_iou
 )
 from dataset import TearDataset
-# 【修改 1】导入 Baseline_SAM2
 from model import Baseline_SAM2
 
 IMG_SIZE = 1024
-DEVICE = "cuda"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+MAX_HD95 = np.sqrt(IMG_SIZE**2 + IMG_SIZE**2) # 对齐最终评估脚本的严谨惩罚
 
 def get_complexity():
-    """计算 Baseline SAM 2 的 Params (Total & Trainable) 和 FLOPs"""
     model = Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
     model.eval()
 
-    # 计算参数量
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
 
-    # 计算 FLOPs
     input_img = torch.randn(1, 3, IMG_SIZE, IMG_SIZE).to(DEVICE)
     input_box = torch.tensor([[0, 0, IMG_SIZE, IMG_SIZE]]).float().to(DEVICE)
 
@@ -42,10 +40,17 @@ def get_complexity():
 
     return flops / 1e9, total_params, trainable_params
 
-def calculate_metrics(pred, lbl):
+def calculate_metrics_robust(pred, lbl):
+    """【修复】完全对齐 get_final_table_v2 的严谨算法"""
     results = {}
-    results['dice'] = compute_dice(pred, lbl, include_background=False).item()
-    results['iou'] = compute_iou(pred, lbl, include_background=False).item()
+    dice_score = compute_dice(pred, lbl, include_background=False).item()
+    iou_score = compute_iou(pred, lbl, include_background=False).item()
+    
+    if lbl.sum() == 0 and pred.sum() == 0:
+        dice_score = 1.0; iou_score = 1.0
+    
+    results['dice'] = dice_score
+    results['iou'] = iou_score
     
     tp = (pred * lbl).sum().item()
     fp = (pred * (1 - lbl)).sum().item()
@@ -57,23 +62,28 @@ def calculate_metrics(pred, lbl):
     if lbl.sum() > 0 and pred.sum() > 0:
         results['hd95'] = compute_hausdorff_distance(pred, lbl, include_background=False, percentile=95).item()
         results['asd'] = compute_average_surface_distance(pred, lbl, include_background=False).item()
-    elif lbl.sum() > 0:
-        results['hd95'] = 100.0; results['asd'] = 50.0
+    elif lbl.sum() > 0 and pred.sum() == 0:
+        results['hd95'] = MAX_HD95 
+        results['asd'] = MAX_HD95 / 2 
     else:
-        results['hd95'] = 0.0; results['asd'] = 0.0
+        if pred.sum() == 0:
+            results['hd95'] = 0.0; results['asd'] = 0.0
+        else:
+            results['hd95'] = MAX_HD95; results['asd'] = MAX_HD95
     return results
 
 def evaluate_fold(fold):
     split_path = f"./data_splits/fold_{fold}.json"
+    
+    # 🔥【修复】强制加载 YOLO 预测框！保证绝对公平
+    yolo_json_path = f"./data_splits/yolo_boxes_fold{fold}.json"
+    
     with open(split_path, 'r') as f: data = json.load(f)
     
-    dataset = TearDataset(data['val'], mode='val', img_size=IMG_SIZE)
+    dataset = TearDataset(data['val'], mode='val', img_size=IMG_SIZE, yolo_pred_json=yolo_json_path)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4)
     
-    # 【修改 3】实例化 Baseline_SAM2
     model = Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
-    
-    # 【修改 4】指向 checkpoints_ablation
     ckpt = f"./checkpoints_ablation/fold_{fold}/best_model.pth"
     
     if not os.path.exists(ckpt):
@@ -81,7 +91,6 @@ def evaluate_fold(fold):
         return None
 
     state_dict = torch.load(ckpt, map_location=DEVICE)
-    # 处理 DDP 前缀
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     model.load_state_dict(new_state_dict)
     model.eval()
@@ -94,17 +103,16 @@ def evaluate_fold(fold):
             lbl = batch['label'].to(DEVICE)
             box = batch['box'].to(DEVICE)
             
-            # 预测
             pred = (torch.sigmoid(model(img, box)) > 0.5).float()
             pred, lbl = pred.cpu(), lbl.cpu()
             
-            batch_res = calculate_metrics(pred, lbl)
+            batch_res = calculate_metrics_robust(pred, lbl)
             for k, v in batch_res.items(): metrics_log[k].append(v)
                 
     return {k: np.mean(v) for k, v in metrics_log.items()}
 
 if __name__ == "__main__":
-    print(f"\n🚀 Baseline SAM 2 (Ablation) 评估...")
+    print(f"\n🚀 Baseline SAM 2 (Ablation - Full Auto with YOLO boxes) 评估...")
 
     try:
         flops, total_params, trainable_params = get_complexity()
@@ -124,8 +132,7 @@ if __name__ == "__main__":
     
     final_results = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
     
-    # 【修改 5】只跑 Fold 0 即可，如果是跑了所有 fold 就改成 [0,1,2,3,4]
-    folds_to_eval = [0,1,2,3,4] 
+    folds_to_eval = [0, 1, 2, 3, 4] 
     
     for fold in folds_to_eval:
         try:
