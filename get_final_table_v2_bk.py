@@ -125,11 +125,7 @@ def evaluate_fold(fold):
     
     # 加载数据
     with open(split_path, 'r') as f: data = json.load(f)
-    
-    # 🔥【修改这里】：把 YOLO 的 JSON 路径传进去！
-    yolo_json_path = f"./data_splits/yolo_boxes_fold{fold}.json"
-    dataset = TearDataset(data['val'], mode='val', img_size=IMG_SIZE, yolo_pred_json=yolo_json_path)
-    
+    dataset = TearDataset(data['val'], mode='val', img_size=IMG_SIZE)
     # 验证集 BatchSize 必须为 1 以保证 Metric 计算准确
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     
@@ -193,8 +189,7 @@ if __name__ == "__main__":
     print(f"\n{' | '.join([f'{h:<8}' for h in headers])}")
     print("-" * 100)
     
-    # for fold in [0, 1, 2, 3, 4]:
-    for fold in [0]:
+    for fold in [0, 1, 2, 3, 4]:
         res = evaluate_fold(fold)
         if res:
             # 格式化打印单行

@@ -23,7 +23,8 @@ from monai.metrics import (
     compute_average_surface_distance, compute_iou
 )
 # 引入所有 Baseline 模型
-from monai.networks.nets import UNet, SwinUNETR, AttentionUnet, SegResNet
+from monai.networks.nets import UNet, SwinUNETR, AttentionUnet, SegResNet, BasicUNetPlusPlus
+from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights, fcn_resnet50, FCN_ResNet50_Weights
 from dataset import TearDataset
 
 # ================= 配置区域 (必须与 ST-SAM 一致) =================
@@ -45,7 +46,7 @@ def get_model(name):
         return SwinUNETR(
             in_channels=3, out_channels=1,
             feature_size=48, spatial_dims=2,
-            use_v2=True,      
+            use_v2=True,
             window_size=8      # 适配 1024 (1024/32=32, 32%8=0)
         )
     elif name == "attentionunet":
@@ -59,6 +60,26 @@ def get_model(name):
             spatial_dims=2, in_channels=3, out_channels=1,
             init_filters=32, blocks_down=[1, 2, 2, 4], blocks_up=[1, 1, 1]
         )
+    elif name == "unetplusplus":
+        return BasicUNetPlusPlus(
+            spatial_dims=2, in_channels=3, out_channels=1,
+            features=(16, 32, 64, 128, 256, 256),
+            deep_supervision=False
+        )
+    elif name == "deeplab":
+        model = deeplabv3_resnet50(weights=None, num_classes=1)
+        model.backbone.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif name == "deeplab_p":
+        m = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.DEFAULT)
+        m.classifier[4] = torch.nn.Conv2d(256, 1, kernel_size=(1, 1))
+        m.aux_classifier[4] = torch.nn.Conv2d(256, 1, kernel_size=(1, 1))
+        return m
+    elif name == "fcn":
+        m = fcn_resnet50(weights=FCN_ResNet50_Weights.DEFAULT)
+        m.classifier[4] = torch.nn.Conv2d(512, 1, kernel_size=(1, 1))
+        m.aux_classifier[4] = torch.nn.Conv2d(256, 1, kernel_size=(1, 1))
+        return m
     else:
         raise ValueError(f"Unknown model: {name}")
 
@@ -161,13 +182,22 @@ def evaluate_fold(model_name, fold):
     with torch.no_grad():
         for batch in tqdm(loader, leave=False, desc=f"Eval {model_name} F{fold}"):
             img, lbl = batch['image'].to(DEVICE), batch['label'].to(DEVICE)
-            logits = model(img)
+            output = model(img)
+
+            # 处理不同模型的输出格式
+            if isinstance(output, dict) and 'out' in output:
+                logits = output['out']  # DeepLab
+            elif isinstance(output, list):
+                logits = output[0]  # UNet++
+            else:
+                logits = output
+
             pred = (torch.sigmoid(logits) > 0.5).float()
-            
+
             # 转 CPU 计算
             pred, lbl = pred.cpu(), lbl.cpu()
             batch_res = calculate_metrics_robust(pred, lbl)
-            
+
             for k, v in batch_res.items(): metrics_log[k].append(v)
                 
     return {k: np.mean(v) for k, v in metrics_log.items()}
@@ -179,8 +209,10 @@ if __name__ == "__main__":
     # 这里列出你想跑的所有 Baseline
     # models_to_run = ["unet"]
     # models_to_run = ["attentionunet"]
-    # models_to_run = ["swinunet"]
-    models_to_run = ["segresnet"]
+    # models_to_run = ["unet","swinunet"]
+    # models_to_run = ["segresnet"]
+    # models_to_run = ["deeplab_p"]
+    models_to_run = ["fcn"]
     #models_to_run = ["unet", "attentionunet", "swinunet", "segresnet"]
     # 如果只想跑某一个，可以注释掉其他的，比如:
     # models_to_run = ["attentionunet"]

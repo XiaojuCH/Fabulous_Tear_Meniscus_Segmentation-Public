@@ -29,7 +29,7 @@ CONFIG = {
     "batch_size": 8,
     "num_workers": 4,
     "lr": 1e-4,
-    "epochs": 100,
+    "epochs": 50,
     "img_size": 1024,
     "model_name": "ST-SAM (Sam2-Hiera-L + GatedDilatedStripAdapter)",
     "optimizer": "AdamW",

@@ -12,8 +12,9 @@ import os
 # from NNew_att_v2_plus_plus import GatedMultiScaleStripAdapter
 # from NNew_att_v2_PPP import GatedMultiScaleStripAdapter
 # from NNew_att_v2_4P import GatedMultiScaleStripAdapter
-from NNNew_att_v2_PPPGPT import GSCSA
-
+# from NNNew_att_v2_PPPGPT import GSCSA
+# from NNNew_att_v2_PPPGPT_final_bk import GSCSA
+from NNNew_att_v2_PPPGPT_final_bk import GSCSA
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)

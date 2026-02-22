@@ -26,17 +26,21 @@ IMG_SIZE = 1024
 DEVICE = "cuda"
 
 def get_complexity():
-    """计算 Baseline SAM 2 的 Params 和 FLOPs"""
-    # 【修改 2】实例化 Baseline_SAM2
+    """计算 Baseline SAM 2 的 Params (Total & Trainable) 和 FLOPs"""
     model = Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
     model.eval()
-    
+
+    # 计算参数量
+    total_params = sum(p.numel() for p in model.parameters()) / 1e6
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
+
+    # 计算 FLOPs
     input_img = torch.randn(1, 3, IMG_SIZE, IMG_SIZE).to(DEVICE)
     input_box = torch.tensor([[0, 0, IMG_SIZE, IMG_SIZE]]).float().to(DEVICE)
-    
-    flops, params = profile(model, inputs=(input_img, input_box), verbose=False)
-    
-    return flops / 1e9, params / 1e6
+
+    flops, _ = profile(model, inputs=(input_img, input_box), verbose=False)
+
+    return flops / 1e9, total_params, trainable_params
 
 def calculate_metrics(pred, lbl):
     results = {}
@@ -101,13 +105,16 @@ def evaluate_fold(fold):
 
 if __name__ == "__main__":
     print(f"\n🚀 Baseline SAM 2 (Ablation) 评估...")
-    
+
     try:
-        flops, params = get_complexity()
-        print(f"🔹 Complexity: Params = {params:.2f} M | FLOPs = {flops:.2f} G")
+        flops, total_params, trainable_params = get_complexity()
+        print(f"🔹 Complexity:")
+        print(f"   ● Total Params     : {total_params:.2f} M")
+        print(f"   ● Trainable Params : {trainable_params:.2f} M")
+        print(f"   ● FLOPs            : {flops:.2f} G")
     except Exception as e:
         print(f"🔹 Complexity 计算失败: {e}")
-        flops, params = 0, 0
+        flops, total_params, trainable_params = 0, 0, 0
 
     headers = ["Fold", "Dice", "IoU", "Recall", "Prec", "HD95", "ASD"]
     header_str = " | ".join([f"{h:<8}" for h in headers])
