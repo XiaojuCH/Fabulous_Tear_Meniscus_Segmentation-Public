@@ -145,29 +145,35 @@ def evaluate_fold(fold):
     model.load_state_dict(new_state_dict)
     model.eval()
     
-    metrics_log = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
-    
+    fold_metrics = {
+        'Colour': {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Infrared': {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
+    }
+
     with torch.no_grad():
         for batch in tqdm(loader, leave=False, desc=f"Fold {fold}"):
             img = batch['image'].to(DEVICE)
-            lbl = batch['label'].to(DEVICE) # [1, 1, H, W]
+            lbl = batch['label'].to(DEVICE)
             box = batch['box'].to(DEVICE)
-            
-            # 推理
+
+            img_id = str(batch['id'][0]).lower()
+            if 'colour' in img_id or 'color' in img_id:
+                modality = 'Colour'
+            else:
+                modality = 'Infrared'
+
             logits = model(img, box)
             pred = (torch.sigmoid(logits) > 0.5).float()
-            
-            # 转 CPU 计算 Metrics
-            pred_cpu = pred.cpu()
-            lbl_cpu = lbl.cpu()
-            
-            # 计算并记录
-            batch_res = calculate_metrics_robust(pred_cpu, lbl_cpu)
+
+            batch_res = calculate_metrics_robust(pred.cpu(), lbl.cpu())
             for k, v in batch_res.items():
-                metrics_log[k].append(v)
-                
-    # 返回该 Fold 的平均值
-    return {k: np.mean(v) for k, v in metrics_log.items()}
+                fold_metrics[modality][k].append(v)
+
+    res_summary = {}
+    for mod in ['Colour', 'Infrared']:
+        if len(fold_metrics[mod]['dice']) > 0:
+            res_summary[mod] = {k: np.mean(v) for k, v in fold_metrics[mod].items()}
+    return res_summary
 
 if __name__ == "__main__":
     print(f"\n🚀 ST-SAM 最终评估脚本 (SCI Mode)")
@@ -187,44 +193,46 @@ if __name__ == "__main__":
         total_p, tunable_p, flops = 0, 0, 0
 
     # 2. 循环评估 5 Folds
-    final_results = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
-    
     headers = ["Fold", "Dice", "IoU", "Recall", "Prec", "HD95", "ASD"]
-    print(f"\n{' | '.join([f'{h:<8}' for h in headers])}")
-    print("-" * 100)
-    
+    global_metrics = {
+        'Colour':   {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Infrared': {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Overall':  {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
+    }
+
     for fold in [0, 1, 2, 3, 4]:
-    # for fold in [0]:
-        res = evaluate_fold(fold)
-        if res:
-            # 格式化打印单行
+        res_summary = evaluate_fold(fold)
+        if not res_summary:
+            continue
+
+        print(f"Fold {fold} Results:")
+        for mod, metrics in res_summary.items():
             row = [
-                f"{fold:<8}",
-                f"{res['dice']:.4f}", f"{res['iou']:.4f}", 
-                f"{res['recall']:.4f}", f"{res['precision']:.4f}",
-                f"{res['hd95']:.2f}", f"{res['asd']:.2f}"
+                f"{mod[:4]:<8}",
+                f"{metrics['dice']:.4f}", f"{metrics['iou']:.4f}",
+                f"{metrics['recall']:.4f}", f"{metrics['precision']:.4f}",
+                f"{metrics['hd95']:.2f}", f"{metrics['asd']:.2f}"
             ]
             print(" | ".join(row))
-            
-            # 存入总表
-            for k, v in res.items():
-                final_results[k].append(v)
-    
+            for k, v in metrics.items():
+                global_metrics[mod][k].append(v)
+                global_metrics['Overall'][k].append(v)
+
     # 3. 输出最终汇总 (Mean ± Std)
-    if len(final_results['dice']) > 0:
+    if len(global_metrics['Overall']['dice']) > 0:
         print("-" * 100)
-        print("🏆 ST-SAM Final Results (5-Fold Cross Validation):")
+        print("🏆 ST-SAM Modality-Aware Final Results:")
         print("-" * 100)
-        
-        # 打印指标
-        for k in headers[1:]:
-            key = k.lower() if k != "Prec" else "precision"
-            vals = final_results[key]
-            mean_val = np.mean(vals)
-            std_val = np.std(vals)
-            # 使用 SCI 论文格式: Mean ± Std
-            print(f"  ● {k:<10}: {mean_val:.4f} ± {std_val:.4f}")
-            
+
+        for category in ['Colour', 'Infrared', 'Overall']:
+            if len(global_metrics[category]['dice']) == 0:
+                continue
+            print(f"\n--- {category} Set ---")
+            for k in headers[1:]:
+                key = k.lower() if k != "Prec" else "precision"
+                vals = global_metrics[category][key]
+                print(f"  ● {k:<10}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+
         print("-" * 100)
         print("📉 Model Efficiency (Paper Claims):")
         print(f"  ● Total Params   : {total_p:.2f} M")

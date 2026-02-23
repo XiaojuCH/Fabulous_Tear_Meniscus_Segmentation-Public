@@ -14,3 +14,8 @@ date,fold,best_dice,best_epoch,train_loss_final,duration,gpu_count,batch_size,nu
 2026-02-17 14:46:51,0,0.9113,52,0.0292,4:23:43,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
 2026-02-17 14:47:08,4,0.9017,34,0.0295,4:23:27,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
 2026-02-17 14:46:58,2,0.8727,16,0.0290,4:24:26,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
+2026-02-22 14:54:20,0,0.8667,57,0.0293,4:22:47,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
+2026-02-22 14:54:43,3,0.8273,43,0.0299,4:24:25,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
+2026-02-22 14:54:32,1,0.8753,50,0.0319,4:24:37,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
+2026-02-22 14:55:00,4,0.8439,23,0.0295,4:24:17,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
+2026-02-22 14:54:36,2,0.8010,77,0.0287,4:25:31,8,8,4,0.0001,100,1024,Baseline SAM 2 (Ablation - No Adapter),AdamW,Dice + BCE
