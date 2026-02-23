@@ -95,21 +95,30 @@ def evaluate_fold(fold):
     model.load_state_dict(new_state_dict)
     model.eval()
     
-    metrics_log = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
-    
+    fold_metrics = {
+        'Colour':   {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Infrared': {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
+    }
+
     with torch.no_grad():
         for batch in tqdm(loader, leave=False):
             img = batch['image'].to(DEVICE)
             lbl = batch['label'].to(DEVICE)
             box = batch['box'].to(DEVICE)
-            
+
+            img_id = str(batch['id'][0]).lower()
+            modality = 'Colour' if ('colour' in img_id or 'color' in img_id) else 'Infrared'
+
             pred = (torch.sigmoid(model(img, box)) > 0.5).float()
-            pred, lbl = pred.cpu(), lbl.cpu()
-            
-            batch_res = calculate_metrics_robust(pred, lbl)
-            for k, v in batch_res.items(): metrics_log[k].append(v)
-                
-    return {k: np.mean(v) for k, v in metrics_log.items()}
+            batch_res = calculate_metrics_robust(pred.cpu(), lbl.cpu())
+            for k, v in batch_res.items():
+                fold_metrics[modality][k].append(v)
+
+    res_summary = {}
+    for mod in ['Colour', 'Infrared']:
+        if len(fold_metrics[mod]['dice']) > 0:
+            res_summary[mod] = {k: np.mean(v) for k, v in fold_metrics[mod].items()}
+    return res_summary
 
 if __name__ == "__main__":
     print(f"\n🚀 Baseline SAM 2 (Ablation - Full Auto with YOLO boxes) 评估...")
@@ -125,31 +134,39 @@ if __name__ == "__main__":
         flops, total_params, trainable_params = 0, 0, 0
 
     headers = ["Fold", "Dice", "IoU", "Recall", "Prec", "HD95", "ASD"]
-    header_str = " | ".join([f"{h:<8}" for h in headers])
-    print("-" * 90)
-    print(header_str)
-    print("-" * 90)
-    
-    final_results = {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
-    
-    folds_to_eval = [0, 1, 2, 3, 4] 
-    
-    for fold in folds_to_eval:
+    global_metrics = {
+        'Colour':   {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Infrared': {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []},
+        'Overall':  {'dice': [], 'iou': [], 'recall': [], 'precision': [], 'hd95': [], 'asd': []}
+    }
+
+    for fold in [0, 1, 2, 3, 4]:
         try:
-            res = evaluate_fold(fold)
-            if res:
-                row_str = f"{fold:<8} | {res['dice']:.4f}   | {res['iou']:.4f}   | {res['recall']:.4f}   | {res['precision']:.4f} | {res['hd95']:.4f}   | {res['asd']:.4f}"
-                print(row_str)
-                for k, v in res.items(): final_results[k].append(v)
+            res_summary = evaluate_fold(fold)
+            if not res_summary:
+                continue
+            print(f"Fold {fold} Results:")
+            for mod, metrics in res_summary.items():
+                row = [f"{mod[:4]:<8}", f"{metrics['dice']:.4f}", f"{metrics['iou']:.4f}",
+                       f"{metrics['recall']:.4f}", f"{metrics['precision']:.4f}",
+                       f"{metrics['hd95']:.2f}", f"{metrics['asd']:.2f}"]
+                print(" | ".join(row))
+                for k, v in metrics.items():
+                    global_metrics[mod][k].append(v)
+                    global_metrics['Overall'][k].append(v)
         except Exception as e:
             print(f"Fold {fold} Error: {e}")
-            
-    if len(final_results['dice']) > 0:
+
+    if len(global_metrics['Overall']['dice']) > 0:
         print("-" * 90)
-        print("🏆 Baseline SAM 2 Final Average:")
-        for k in headers[1:]:
-            k_lower = k.lower() if k != "Prec" else "precision"
-            avg = np.mean(final_results[k_lower])
-            std = np.std(final_results[k_lower])
-            print(f"   {k:<8}: {avg:.4f} ± {std:.4f}")
+        print("🏆 Baseline SAM 2 Modality-Aware Final Results:")
+        print("-" * 90)
+        for category in ['Colour', 'Infrared', 'Overall']:
+            if len(global_metrics[category]['dice']) == 0:
+                continue
+            print(f"\n--- {category} Set ---")
+            for k in headers[1:]:
+                key = k.lower() if k != "Prec" else "precision"
+                vals = global_metrics[category][key]
+                print(f"  ● {k:<10}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
     print("=" * 90)
