@@ -235,3 +235,113 @@ class Baseline_SAM2(nn.Module):
         )
         
         return masks
+
+import math
+
+# ==============================================================================
+# 辅助模块：标准 LoRA 线性层
+# ==============================================================================
+class LoRALinear(nn.Module):
+    def __init__(self, original_linear, rank=4, alpha=4):
+        super().__init__()
+        # 保持原有全连接层，并彻底冻结
+        self.linear = original_linear
+        for param in self.linear.parameters():
+            param.requires_grad = False
+            
+        self.in_features = original_linear.in_features
+        self.out_features = original_linear.out_features
+        self.rank = rank
+        self.scaling = alpha / rank
+
+        # LoRA 的 A 和 B 矩阵
+        self.lora_A = nn.Parameter(torch.zeros(self.in_features, rank))
+        self.lora_B = nn.Parameter(torch.zeros(rank, self.out_features))
+        
+        # 初始化：A 用 Kaiming，B 全零，保证初始状态等效于原网络
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+
+    def forward(self, x):
+        # 原有输出 + 低秩矩阵输出
+        orig_out = self.linear(x)
+        lora_out = (x @ self.lora_A @ self.lora_B) * self.scaling
+        return orig_out + lora_out
+
+def inject_lora_to_decoder(module, rank=4):
+    """递归地将 Mask Decoder 中的 nn.Linear 替换为 LoRALinear"""
+    for name, child in module.named_children():
+        if isinstance(child, nn.Linear):
+            # 替换线性层
+            setattr(module, name, LoRALinear(child, rank=rank))
+        else:
+            inject_lora_to_decoder(child, rank=rank)
+
+# ==============================================================================
+# 对比模型 1：SAM 2 + LoRA Baseline
+# ==============================================================================
+class LoRA_SAM2(nn.Module):
+    def __init__(self, 
+                 model_cfg="sam2_hiera_l.yaml", 
+                 checkpoint_path="./checkpoints/sam2_hiera_large.pt",
+                 lora_rank=4
+                 ):
+        super().__init__()
+        
+        # 1. 加载 SAM2 骨干
+        if not os.path.exists(checkpoint_path) and os.path.exists(f"../{checkpoint_path}"):
+            checkpoint_path = f"../{checkpoint_path}"
+            
+        self.sam2 = build_sam2(model_cfg, checkpoint_path)
+        
+        # 2. 全面冻结原生参数
+        for param in self.sam2.parameters():
+            param.requires_grad = False
+
+        # 3. 维度投影层 (保留，为了能够对齐输入，这是必要的架构妥协)
+        self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
+        self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
+        
+        # 4. 注入 LoRA 到 Mask Decoder
+        inject_lora_to_decoder(self.sam2.sam_mask_decoder, rank=lora_rank)
+        
+        # 5. 开启必要梯度的追踪
+        # 仅开启我们自己加的投影层和 LoRA 参数的梯度
+        for param in self.proj_s0.parameters():
+            param.requires_grad = True
+        for param in self.proj_s1.parameters():
+            param.requires_grad = True
+            
+        # LoRA 参数默认 requires_grad=True，所以直接筛选即可
+        
+    def forward(self, images, box_prompts):
+        with torch.no_grad():
+            backbone_out = self.sam2.image_encoder(images)
+            src_features = backbone_out["vision_features"]
+            _fpn_features = backbone_out["backbone_fpn"]
+            raw_s0 = _fpn_features[0] 
+            raw_s1 = _fpn_features[1] 
+
+        # 投影
+        feat_s0 = self.proj_s0(raw_s0)  
+        feat_s1 = self.proj_s1(raw_s1)  
+        high_res_features = [feat_s0, feat_s1]
+
+        with torch.no_grad():
+            sparse_embeddings, dense_embeddings = self.sam2.sam_prompt_encoder(
+                points=None, boxes=box_prompts, masks=None,
+            )
+
+        # 带有 LoRA 的 Mask Decoder 推理
+        low_res_masks, iou_predictions, _, _ = self.sam2.sam_mask_decoder(
+            image_embeddings=src_features, 
+            image_pe=self.sam2.sam_prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=False,
+            repeat_image=False,
+            high_res_features=high_res_features 
+        )
+        
+        masks = F.interpolate(low_res_masks, size=(images.shape[2], images.shape[3]), mode="bilinear", align_corners=False)
+        return masks

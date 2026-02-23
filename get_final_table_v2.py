@@ -29,7 +29,7 @@ except ImportError:
     sys.exit(1)
 
 from dataset import TearDataset
-from model import ST_SAM
+from model import ST_SAM, LoRA_SAM2
 
 # ================= 配置区域 =================
 IMG_SIZE = 1024
@@ -117,7 +117,7 @@ def calculate_metrics_robust(pred, lbl):
 def evaluate_fold(fold):
     print(f"🔄 Evaluating Fold {fold} ...")
     split_path = f"./data_splits/fold_{fold}.json"
-    ckpt_path = f"./checkpoints/fold_{fold}/best_model.pth"
+    ckpt_path = f"./checkpoints_lora/fold_{fold}/best_model.pth"
     
     if not os.path.exists(ckpt_path):
         print(f"⚠️ Checkpoint not found: {ckpt_path}, skipping Fold {fold}")
@@ -134,7 +134,7 @@ def evaluate_fold(fold):
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     
     # 加载模型
-    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
+    model = LoRA_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
     
     # 加载权重 (处理 DDP 前缀)
     state_dict = torch.load(ckpt_path, map_location=DEVICE)
