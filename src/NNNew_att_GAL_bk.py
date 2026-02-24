@@ -63,6 +63,7 @@ class GAL_Adapter(nn.Module):
     def forward(self, x):
         shortcut = x
         x = self.proj_in(x)
+
         x_oriented = self.pre_orient(x)
 
         lh = self.strip_h_large(x_oriented)
@@ -71,8 +72,12 @@ class GAL_Adapter(nn.Module):
         sw = self.strip_w_small(x_oriented)
         loc3 = self.local_3x3(x)
         loc5 = self.local_5x5(x)
+
         branches = [lh, lw, sh, sw, loc3, loc5]
 
+        # ==========================================
+        # 恢复 V1：强大的像素级空间门控 (Spatial Gating)
+        # ==========================================
         cat_feat = torch.cat(branches, dim=1)
         weight = self.branch_weight(cat_feat)
 
@@ -84,7 +89,27 @@ class GAL_Adapter(nn.Module):
         stacked = torch.stack(branches, dim=1)
         out = (weight * stacked).sum(dim=1) 
 
-        # 🚨 模型 B 修改：彻底屏蔽 CCSM，不要算 mean/var 和 gamma/beta
+        # ==========================================
+        # 恢复 V1，附加数值安全补丁：动态通道缩放
+        # ==========================================
+        b, c, h, w = out.shape
+        out_flat = out.view(b, c, -1)
+        
+        # 提取特征
+        feat_mean = out_flat.mean(dim=2, keepdim=True).unsqueeze(-1) # [B, C, 1, 1]
+        var = out_flat.var(dim=2, keepdim=True, unbiased=False)
+        # 🚨 极其关键的防崩补丁：+ 1e-5
+        feat_std = torch.sqrt(var + 1e-5).unsqueeze(-1) # [B, C, 1, 1]
+        
+        style_feat = torch.cat([feat_mean, feat_std], dim=1)
+        
+        gamma_beta = self.style_fc(style_feat)
+        gamma, beta = torch.chunk(gamma_beta, 2, dim=1)
+        gamma = 2.0 * torch.sigmoid(gamma) 
+        
+        # 不做 InstanceNorm！保留你的绝对强度信息！
+        out = gamma * out + beta
+        
         out = self.proj_out(out)
 
         return shortcut + out
