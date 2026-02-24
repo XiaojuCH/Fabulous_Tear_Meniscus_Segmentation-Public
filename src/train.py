@@ -19,7 +19,7 @@ import warnings
 warnings.filterwarnings("ignore", message="Grad strides do not match bucket view strides")
 
 from dataset import TearDataset
-from model import ST_SAM, LoRA_SAM2
+from model import ST_SAM, LoRA_SAM2, MSA_Baseline_SAM2
 
 # ==============================================================================
 # 配置区域 (Global Config)
@@ -118,7 +118,7 @@ def main(fold):
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], sampler=val_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
 
     # model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
-    model = LoRA_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    model = MSA_Baseline_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
@@ -129,7 +129,7 @@ def main(fold):
     best_dice = 0.0
     best_epoch = 0
     # save_dir = f"./checkpoints/fold_{fold}"
-    save_dir = f"./checkpoints_lora/fold_{fold}"
+    save_dir = f"./checkpoints_msa/fold_{fold}"
     if is_master:
         os.makedirs(save_dir, exist_ok=True)
 

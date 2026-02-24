@@ -345,3 +345,100 @@ class LoRA_SAM2(nn.Module):
         
         masks = F.interpolate(low_res_masks, size=(images.shape[2], images.shape[3]), mode="bilinear", align_corners=False)
         return masks
+
+
+# ==============================================================================
+# 辅助模块：通用的瓶颈 Adapter (MSA 风格)
+# ==============================================================================
+class MSA_Adapter(nn.Module):
+    def __init__(self, in_channels, reduction=4):
+        super().__init__()
+        mid_channels = max(in_channels // reduction, 16)
+        # 一个非常标准的卷积瓶颈结构，没有特殊的花样
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.GELU(),
+            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.GELU(),
+            nn.Conv2d(mid_channels, in_channels, kernel_size=1, bias=False)
+        )
+
+    def forward(self, x):
+        return x + self.bottleneck(x)
+
+# ==============================================================================
+# 对比模型 2：SAM 2 + 经典瓶颈 Adapter (MSA Baseline)
+# ==============================================================================
+class MSA_Baseline_SAM2(nn.Module):
+    def __init__(self, 
+                 model_cfg="sam2_hiera_l.yaml", 
+                 checkpoint_path="./checkpoints/sam2_hiera_large.pt"
+                 ):
+        super().__init__()
+        
+        # 1. 加载冻结的 SAM2 主干
+        if not os.path.exists(checkpoint_path) and os.path.exists(f"../{checkpoint_path}"):
+            checkpoint_path = f"../{checkpoint_path}"
+        self.sam2 = build_sam2(model_cfg, checkpoint_path)
+        
+        for param in self.sam2.image_encoder.parameters():
+            param.requires_grad = False
+        for param in self.sam2.sam_prompt_encoder.parameters():
+            param.requires_grad = False
+        for param in self.sam2.memory_attention.parameters():
+            param.requires_grad = False
+
+        # 2. 投影层
+        self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
+        self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
+        
+        # 3. 注入经典 Adapter (而不是你的 GAL)
+        self.adapter_s0 = MSA_Adapter(in_channels=32)
+        self.adapter_s1 = MSA_Adapter(in_channels=64)
+
+        # 4. 开启梯度 (注意：这里和你的 SAM_Gal 一样，开启了整个 Decoder 的微调！)
+        for param in self.sam2.sam_mask_decoder.parameters():
+            param.requires_grad = True
+            
+        trainable_layers = [self.proj_s0, self.proj_s1, self.adapter_s0, self.adapter_s1]
+        for layer in trainable_layers:
+            for param in layer.parameters():
+                param.requires_grad = True
+
+    def forward(self, images, box_prompts):
+        with torch.no_grad():
+            backbone_out = self.sam2.image_encoder(images)
+            src_features = backbone_out["vision_features"]
+            _fpn_features = backbone_out["backbone_fpn"]
+            raw_s0 = _fpn_features[0]
+            raw_s1 = _fpn_features[1]
+
+        # 特征注入流程
+        feat_s0 = self.proj_s0(raw_s0)
+        feat_s1 = self.proj_s1(raw_s1)
+        
+        # 经过经典的 MSA Adapter
+        refined_s0 = self.adapter_s0(feat_s0)
+        refined_s1 = self.adapter_s1(feat_s1)
+        high_res_features = [refined_s0, refined_s1]
+
+        with torch.no_grad():
+            sparse_embeddings, dense_embeddings = self.sam2.sam_prompt_encoder(
+                points=None, boxes=box_prompts, masks=None,
+            )
+
+        # Decoder 推理
+        low_res_masks, iou_predictions, _, _ = self.sam2.sam_mask_decoder(
+            image_embeddings=src_features, 
+            image_pe=self.sam2.sam_prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=False,
+            repeat_image=False,
+            high_res_features=high_res_features 
+        )
+        
+        masks = F.interpolate(low_res_masks, size=(images.shape[2], images.shape[3]), mode="bilinear", align_corners=False)
+        return masks
