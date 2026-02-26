@@ -82,6 +82,26 @@ class TearDataset(Dataset):
                 # 兜底框 (YOLO万一没检测到的情况)
                 box = [0, 0, self.img_size, self.img_size]
 
+        # if self.mode == "train":
+        #     # 训练时：通过干净的 GT 生成框，并加入随机扰动（教模型抗干扰）
+        #     box = self.get_bbox_from_mask(label_np)
+        #     box = self.perturb_box(box, self.img_size)
+        # else:
+        #     # 🔥【极简测试临时修改】：验证/测试时也直接提取完美的 GT Box！
+        #     box = self.get_bbox_from_mask(label_np)
+            
+        #     # 👇 将原本读取 YOLO 框的代码全部注释掉 👇
+        #     # if img_id in self.yolo_preds:
+        #     #     box_norm = self.yolo_preds[img_id]
+        #     #     box = [
+        #     #         box_norm[0] * self.img_size, 
+        #     #         box_norm[1] * self.img_size, 
+        #     #         box_norm[2] * self.img_size, 
+        #     #         box_norm[3] * self.img_size
+        #     #     ]
+        #     # else:
+        #     #     box = [0, 0, self.img_size, self.img_size]
+
         box_tensor = torch.tensor(box, dtype=torch.float32)
 
         return {
