@@ -1,0 +1,6 @@
+date,fold,best_dice,best_epoch,train_loss_final,duration,gpu_count,batch_size,num_workers,lr,epochs,img_size,model_name,optimizer,loss
+2026-02-27 01:50:46,0,0.8645,41,0.0362,2:08:27,8,8,4,0.0001,50,1024,"MedSAM (SAM2-Hiera-L, Frozen Encoder, Full Decoder FT)",AdamW,Dice + BCE
+2026-02-27 01:51:00,1,0.8740,44,0.0389,2:08:17,8,8,4,0.0001,50,1024,"MedSAM (SAM2-Hiera-L, Frozen Encoder, Full Decoder FT)",AdamW,Dice + BCE
+2026-02-27 01:51:48,3,0.8267,27,0.0366,2:08:39,8,8,4,0.0001,50,1024,"MedSAM (SAM2-Hiera-L, Frozen Encoder, Full Decoder FT)",AdamW,Dice + BCE
+2026-02-27 01:51:32,2,0.7997,40,0.0353,2:09:52,8,8,4,0.0001,50,1024,"MedSAM (SAM2-Hiera-L, Frozen Encoder, Full Decoder FT)",AdamW,Dice + BCE
+2026-02-27 01:52:34,4,0.8453,29,0.0362,2:08:53,8,8,4,0.0001,50,1024,"MedSAM (SAM2-Hiera-L, Frozen Encoder, Full Decoder FT)",AdamW,Dice + BCE

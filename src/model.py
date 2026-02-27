@@ -15,9 +15,9 @@ import os
 # from NNNew_att_v2_PPPGPT import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
-# from NNNew_att_GAL import GAL_Adapter
+from NNNew_att_GAL_bk import GAL_Adapter
 # from NNNew_att_GAL_Notin import GAL_Adapter
-from NNNew_att_GAL_V2 import GAL_Adapter
+# from NNNew_att_GAL_V2 import GAL_Adapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
@@ -433,14 +433,95 @@ class MSA_Baseline_SAM2(nn.Module):
 
         # Decoder 推理
         low_res_masks, iou_predictions, _, _ = self.sam2.sam_mask_decoder(
-            image_embeddings=src_features, 
+            image_embeddings=src_features,
             image_pe=self.sam2.sam_prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
             multimask_output=False,
             repeat_image=False,
-            high_res_features=high_res_features 
+            high_res_features=high_res_features
         )
-        
+
         masks = F.interpolate(low_res_masks, size=(images.shape[2], images.shape[3]), mode="bilinear", align_corners=False)
+        return masks
+
+
+# ==============================================================================
+# 对比模型：MedSAM-style (SAM2-Hiera-L + 全量 Mask Decoder 微调)
+# 参考: Ma et al., "Segment Anything in Medical Images", Nature Communications 2024
+# 对齐策略: 冻结 Image Encoder，仅微调 Mask Decoder + 投影层，无任何自定义 Adapter
+# ==============================================================================
+class MedSAM_SAM2(nn.Module):
+    def __init__(self,
+                 model_cfg="sam2_hiera_l.yaml",
+                 checkpoint_path="./checkpoints/sam2_hiera_large.pt"):
+        super().__init__()
+
+        if not os.path.exists(checkpoint_path):
+            if os.path.exists(f"../{checkpoint_path}"):
+                checkpoint_path = f"../{checkpoint_path}"
+            else:
+                print(f"⚠️ Warning: Checkpoint not found at {checkpoint_path}")
+
+        self.sam2 = build_sam2(model_cfg, checkpoint_path)
+
+        # 冻结 Image Encoder（与 MedSAM 官方策略一致）
+        for param in self.sam2.image_encoder.parameters():
+            param.requires_grad = False
+        for param in self.sam2.sam_prompt_encoder.parameters():
+            param.requires_grad = False
+        for param in self.sam2.memory_attention.parameters():
+            param.requires_grad = False
+
+        # 维度投影层（结构适配，与 Baseline_SAM2 完全一致）
+        self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
+        self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
+
+        # 开启 Mask Decoder 全量微调（MedSAM 核心策略）
+        for param in self.sam2.sam_mask_decoder.parameters():
+            param.requires_grad = True
+        for param in self.proj_s0.parameters():
+            param.requires_grad = True
+        for param in self.proj_s1.parameters():
+            param.requires_grad = True
+
+    def forward(self, images, box_prompts):
+        # 1. Image Encoder (Frozen)
+        with torch.no_grad():
+            backbone_out = self.sam2.image_encoder(images)
+            src_features = backbone_out["vision_features"]
+            _fpn_features = backbone_out["backbone_fpn"]
+            raw_s0 = _fpn_features[0]
+            raw_s1 = _fpn_features[1]
+
+        # 2. 维度投影（无 Adapter，直接透传）
+        feat_s0 = self.proj_s0(raw_s0)
+        feat_s1 = self.proj_s1(raw_s1)
+        high_res_features = [feat_s0, feat_s1]
+
+        # 3. Prompt Encoder (Frozen)
+        sparse_embeddings, dense_embeddings = self.sam2.sam_prompt_encoder(
+            points=None,
+            boxes=box_prompts,
+            masks=None,
+        )
+
+        # 4. Mask Decoder (Trainable - MedSAM 核心)
+        low_res_masks, iou_predictions, _, _ = self.sam2.sam_mask_decoder(
+            image_embeddings=src_features,
+            image_pe=self.sam2.sam_prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=False,
+            repeat_image=False,
+            high_res_features=high_res_features,
+        )
+
+        # 5. Upscale to original resolution
+        masks = F.interpolate(
+            low_res_masks,
+            size=(images.shape[2], images.shape[3]),
+            mode="bilinear",
+            align_corners=False,
+        )
         return masks
