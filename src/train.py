@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore", message="Grad strides do not match bucket view
 
 from dataset import TearDataset
 from model import ST_SAM, LoRA_SAM2, MSA_Baseline_SAM2
+from medsam_model import True_MedSAM
 
 # ==============================================================================
 # 配置区域 (Global Config)
@@ -35,6 +36,7 @@ CONFIG = {
     "optimizer": "AdamW",
     "scheduler": "None", # 如果加了 scheduler 这里也要记
     "loss": "Dice + BCE",
+    # "loss": "BoundaryAwareLoss (0.4Dice+0.4BCE+0.2Bound)",
     "gpu_count": 8
 }
 
@@ -162,12 +164,14 @@ def main(fold):
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], sampler=val_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
 
     # model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
-    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    # model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(local_rank) #记得这个是madsam的权重
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=CONFIG['lr'])
     criterion = DiceBCELoss().to(local_rank)
+    # criterion = BoundaryAwareLoss(dice_weight=0.4, bce_weight=0.4, boundary_weight=0.2).to(local_rank) # <--- 换成这句
     scaler = GradScaler('cuda') 
 
     best_dice = 0.0
