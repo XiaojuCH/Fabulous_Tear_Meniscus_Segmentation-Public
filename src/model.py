@@ -15,9 +15,12 @@ import os
 # from NNNew_att_v2_PPPGPT import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
-from NNNew_att_GAL_bk import GAL_Adapter
+
+# from NNNew_att_GAL_bk import GAL_Adapter
+
 # from NNNew_att_GAL_Notin import GAL_Adapter
 # from NNNew_att_GAL_V2 import GAL_Adapter
+from NNNew_att_GAL_V3 import GAL_Adapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)

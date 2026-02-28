@@ -73,50 +73,6 @@ class DiceBCELoss(nn.Module):
         dice_loss = 1 - (2.*intersection + smooth)/(inputs_flat.sum() + targets_flat.sum() + smooth)
         return 0.5 * bce_loss + 0.5 * dice_loss
 
-
-class BoundaryAwareLoss(nn.Module):
-    def __init__(self, dice_weight=0.4, bce_weight=0.4, boundary_weight=0.2):
-        super(BoundaryAwareLoss, self).__init__()
-        self.dice_weight = dice_weight
-        self.bce_weight = bce_weight
-        self.boundary_weight = boundary_weight
-        
-    def forward(self, inputs, targets, smooth=1):
-        # 1. 计算基础 BCE
-        bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='mean')
-        
-        # 2. 计算基础 Dice
-        inputs_sigmoid = torch.sigmoid(inputs)
-        inputs_flat = inputs_sigmoid.view(-1)
-        targets_flat = targets.view(-1)
-        intersection = (inputs_flat * targets_flat).sum()
-        dice_loss = 1 - (2. * intersection + smooth) / (inputs_flat.sum() + targets_flat.sum() + smooth)
-        
-        # 3. 🚀 边界增强 Loss (Boundary Enforcement)
-        # 通过 Max Pooling 膨胀，再减去原图，提取出 Mask 的边缘轮廓
-        with torch.no_grad():
-            # 使用 5x5 的核提取稍微宽一点的边界区域
-            kernel_size = 5
-            padding = kernel_size // 2
-            # 膨胀操作
-            dilated = F.max_pool2d(targets, kernel_size=kernel_size, stride=1, padding=padding)
-            # 腐蚀操作 (对反转的 target 做 max_pool 然后反转回来)
-            eroded = 1.0 - F.max_pool2d(1.0 - targets, kernel_size=kernel_size, stride=1, padding=padding)
-            
-            # 边界区域 = 膨胀 - 腐蚀
-            boundary_mask = dilated - eroded
-        
-        # 提取模型预测的概率图
-        preds = torch.sigmoid(inputs)
-        
-        # 在边界区域计算 L1 差异，强迫模型在边缘处的预测无限逼近 GT，消除“歪歪扭扭”
-        boundary_loss = F.l1_loss(preds * boundary_mask, targets * boundary_mask, reduction='sum')
-        # 归一化：除以边界像素的总数，防止 boundary_loss 数值过大
-        boundary_pixels = boundary_mask.sum() + 1e-6
-        boundary_loss = boundary_loss / boundary_pixels
-        
-        return self.dice_weight * dice_loss + self.bce_weight * bce_loss + self.boundary_weight * boundary_loss
-
 # ==============================================================================
 # 辅助函数：记录实验数据到 CSV
 # ==============================================================================
@@ -164,8 +120,8 @@ def main(fold):
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['batch_size'], sampler=val_sampler, num_workers=CONFIG['num_workers'], pin_memory=True)
 
     # model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
-    # model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
-    model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(local_rank) #记得这个是madsam的权重
+    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(local_rank)
+    # model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(local_rank) #记得这个是madsam的权重
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 

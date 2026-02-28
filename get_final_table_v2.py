@@ -135,8 +135,8 @@ def evaluate_fold(fold):
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     
     # 加载模型
-    # model = True_MedSAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
-    model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(DEVICE) #记得这个是madsam的权重
+    model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
+    # model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(DEVICE) #记得这个是madsam的权重
     
     # 加载权重 (处理 DDP 前缀)
     state_dict = torch.load(ckpt_path, map_location=DEVICE)
@@ -186,8 +186,8 @@ if __name__ == "__main__":
     print("🔹 Calculating Complexity...")
     try:
         # 初始化一个临时模型用于计算参数
-        # temp_model = MedSAM_SAM2(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
-        temp_model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(DEVICE) #记得这个是madsam的权重
+        temp_model = ST_SAM(checkpoint_path="./checkpoints/sam2_hiera_large.pt").to(DEVICE)
+        # temp_model = True_MedSAM(checkpoint_path="./checkpoints/medsam_vit_b.pth").to(DEVICE) #记得这个是madsam的权重
         total_p, tunable_p, flops = get_model_complexity(temp_model)
         del temp_model # 释放显存
         torch.cuda.empty_cache()

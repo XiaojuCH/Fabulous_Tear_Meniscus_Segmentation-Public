@@ -27,7 +27,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # 权重路径
 CKPT_BASE = f"./checkpoints_ablation/fold_{FOLD}/best_model.pth" # 替换为你的真实路径
 CKPT_MSA  = f"./checkpoints_msa/fold_{FOLD}/best_model.pth"                    # 替换为你的真实路径
-CKPT_OURS = f"./checkpoints_gal50_bk/fold_{FOLD}/best_model.pth"                        # 替换为你的真实路径
+CKPT_OURS = f"./checkpoints/fold_{FOLD}/best_model.pth"                        # 替换为你的真实路径
 
 # YOLO 预测框 JSON 路径
 YOLO_JSON = f"./data_splits/yolo_boxes_fold{FOLD}.json"
