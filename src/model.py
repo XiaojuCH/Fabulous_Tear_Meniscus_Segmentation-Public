@@ -59,18 +59,23 @@ class ST_SAM(nn.Module):
         self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
         self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
         
-#       # 【s0 层 (Stride 4)】: 保持精细，微调贴合度
+# 恢复真·V1 的大感受野，以保证宏观不连断裂
+        # 引入 reduction=8 作为强正则化器，强制抹平门控网络对反光的敏感度抖动！
+        
+        # 【s0 层 (Stride 4)】: 
         self.adapter_s0 = GAL_Adapter(
             in_channels=32, 
-            kernel_size_large=15, # 覆盖原图 60 像素，完美拟合局部弧度
-            kernel_size_small=5 
+            kernel_size_large=23,  # 恢复最优大感受野
+            kernel_size_small=7, 
+            reduction=8            # 🚀 终极杀手锏：降低通道自由度，强迫边缘平滑
         )
         
-        # 【s1 层 (Stride 8)】: 🚨 大幅降低刚性，防止“直棍”戳出边界
+        # 【s1 层 (Stride 8)】: 
         self.adapter_s1 = GAL_Adapter(
             in_channels=64, 
-            kernel_size_large=11, # 从 23 降到 11 (覆盖原图 88 像素，足够连通伪影断裂，且不会严重违背弧度)
-            kernel_size_small=3   # 从 7 降到 3，聚焦更紧凑的语义
+            kernel_size_large=23,  # 恢复最优大感受野
+            kernel_size_small=7,
+            reduction=8            # 🚀 终极杀手锏
         )
 
         # ---------------------------------------------------------
