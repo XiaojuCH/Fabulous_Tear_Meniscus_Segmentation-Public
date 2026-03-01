@@ -16,14 +16,14 @@ import os
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
 # from NNNew_att_v2_PPPGPT_final_bk import GSCSA
 
-from NNNew_att_GAL_bk import GAL_Adapter
+# from NNNew_att_GAL_bk import GAL_Adapter
 
 # from NNNew_att_GAL_Notin import GAL_Adapter
 # from NNNew_att_GAL_V2 import GAL_Adapter
 # from NNNew_att_GAL_V3 import GAL_Adapter
 # from NNNew_att_GAL_V4 import GAL_Adapter
 # from NNNew_att_GAL_V5 import GAL_Adapter
-# from NNNew_att_GAL_V6 import GAL_Adapter
+from NNNew_att_GAL_V6 import GAL_Adapter
 
 # ==============================================================================
 # 主模型：ST-SAM (High-Res Injection Version)
@@ -59,18 +59,22 @@ class ST_SAM(nn.Module):
         self.proj_s0 = nn.Conv2d(256, 32, kernel_size=1, bias=False)
         self.proj_s1 = nn.Conv2d(256, 64, kernel_size=1, bias=False)
         
-#       # 【s0 层 (Stride 4)】: 保持精细，微调贴合度
+#       【s0 层 (Stride 4)】: 最精细层
+        # 策略：Large=15 (看局部长条), Small=5 (看像素细节)
+        # s0 分辨率很高(256x256)，核不用太大，重点是修补边缘
         self.adapter_s0 = GAL_Adapter(
             in_channels=32, 
-            kernel_size_large=15, # 覆盖原图 60 像素，完美拟合局部弧度
+            kernel_size_large=15, 
             kernel_size_small=5 
         )
         
-        # 【s1 层 (Stride 8)】: 🚨 大幅降低刚性，防止“直棍”戳出边界
+        # 【s1 层 (Stride 8)】: 抗干扰层
+        # 策略：Large=23 (看整体轮廓，抗圆环干扰), Small=7 (防断裂)
+        # s1 负责在 128x128 尺度上把泪河“连起来”
         self.adapter_s1 = GAL_Adapter(
             in_channels=64, 
-            kernel_size_large=11, # 从 23 降到 11 (覆盖原图 88 像素，足够连通伪影断裂，且不会严重违背弧度)
-            kernel_size_small=3   # 从 7 降到 3，聚焦更紧凑的语义
+            kernel_size_large=23, 
+            kernel_size_small=7
         )
 
         # ---------------------------------------------------------
