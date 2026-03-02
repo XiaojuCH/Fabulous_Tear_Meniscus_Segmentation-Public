@@ -65,17 +65,17 @@ class ST_SAM(nn.Module):
         # 【s0 层 (Stride 4)】: 
         self.adapter_s0 = GAL_Adapter(
             in_channels=32, 
-            kernel_size_large=23,  # 恢复最优大感受野
+            kernel_size_large=23, 
+            kernel_size_mid=15,    # 🚀 新增
             kernel_size_small=7, 
-            reduction=16            # 🚀 终极杀手锏：降低通道自由度，强迫边缘平滑
+            reduction=16           # 坚守神级参数
         )
-        
-        # 【s1 层 (Stride 8)】: 
         self.adapter_s1 = GAL_Adapter(
             in_channels=64, 
-            kernel_size_large=23,  # 恢复最优大感受野
+            kernel_size_large=23, 
+            kernel_size_mid=15,    # 🚀 新增
             kernel_size_small=7,
-            reduction=16            # 🚀 终极杀手锏
+            reduction=16
         )
 
         # ---------------------------------------------------------
