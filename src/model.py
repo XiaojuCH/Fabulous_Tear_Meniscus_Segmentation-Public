@@ -26,7 +26,8 @@ import os
 # from NNNew_att_GAL_V6 import GAL_Adapter
 # from NNNew_att_GAL_V7 import GAL_Adapter
 # from NNNew_att_GAL_V8 import GAL_Adapter
-from NNNew_att_GAL_V9 import GAL_Adapter
+# from NNNew_att_GAL_V9 import GAL_Adapter
+from NNNew_att_GAL_V10 import GAL_Adapter
 
 
 # ==============================================================================
