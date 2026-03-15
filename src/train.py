@@ -133,7 +133,7 @@ def main(fold):
     best_dice = 0.0
     best_epoch = 0
     # save_dir = f"./checkpoints/fold_{fold}"
-    save_dir = f"./checkpoints_gal2/fold_{fold}"
+    save_dir = f"./checkpoints_gal3/fold_{fold}"
     if is_master:
         os.makedirs(save_dir, exist_ok=True)
 
